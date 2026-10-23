@@ -9,6 +9,7 @@ import com.example.bodegalider.model.Product
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.MetadataChanges
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,7 +31,7 @@ class InventoryRepository(context: Context) {
     private val _isOnline = MutableStateFlow(true)
     val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
 
-    private var hasSeeded = false
+    private var hasSyncedCatalog = false
     private val listenerRegistration: ListenerRegistration
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
@@ -46,7 +47,7 @@ class InventoryRepository(context: Context) {
     init {
         // Escucha en tiempo real de Firestore (sincronización multiusuario en la nube).
         // Firestore mantiene caché local, así que los cambios hechos sin señal se envían al reconectar.
-        listenerRegistration = productsCollection.addSnapshotListener { snapshot, error ->
+        listenerRegistration = productsCollection.addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
             if (error != null) {
                 Log.w(TAG, "Error al escuchar productos", error)
                 _isLoading.value = false
@@ -54,13 +55,14 @@ class InventoryRepository(context: Context) {
             }
             if (snapshot == null) return@addSnapshotListener
 
-            if (snapshot.isEmpty && !hasSeeded) {
-                hasSeeded = true
-                seedInitialData()
-                return@addSnapshotListener
+            val current = snapshot.documents.mapNotNull { it.toProduct() }
+            // Solo con datos del servidor: con la caché vacía se crearían productos que ya existen en la nube
+            if (!hasSyncedCatalog && !snapshot.metadata.isFromCache) {
+                hasSyncedCatalog = true
+                syncCatalog(current)
             }
 
-            _products.value = snapshot.documents.mapNotNull { it.toProduct() }
+            _products.value = current
             _isLoading.value = false
         }
 
@@ -101,22 +103,35 @@ class InventoryRepository(context: Context) {
         "locationDetail" to locationDetail
     )
 
-    private fun seedInitialData() {
-        val initial = listOf(
-            Product(id = "1", barcode = "7801610001234", name = "Leche Entera 1L", brand = "Colun",
-                stockOnShelf = 3, quantityNeeded = 10, aisle = "Pasillo 2", locationDetail = "Cartel 5"),
-            Product(id = "2", barcode = "7802340005678", name = "Yogurt Batido Frutilla 125g", brand = "Soprole",
-                stockOnShelf = 0, quantityNeeded = 15, isOutOfStock = true, aisle = "Pasillo 2", locationDetail = "Cabecera Norte"),
-            Product(id = "3", barcode = "7804560009012", name = "Atún en Aceite Lata 160g", brand = "Gourmet",
-                stockOnShelf = 12, quantityNeeded = 4, aisle = "Pasillo 5", locationDetail = "Cartel 12"),
-            Product(id = "4", barcode = "7807890003456", name = "Arroz Grado 1 1kg", brand = "Tucapel",
-                stockOnShelf = 1, quantityNeeded = 20, aisle = "Pasillo 4", locationDetail = "Isla Central"),
-            Product(id = "5", barcode = "7809990001111", name = "Fideos Spaghetti N°5 400g", brand = "Lucchetti",
-                stockOnShelf = 0, quantityNeeded = 12, isOutOfStock = true, aisle = "Pasillo 4", locationDetail = "Cartel 8")
-        )
+    /**
+     * Agrega a Firestore los productos del catálogo P&G que aún no están registrados (por código de barras)
+     * y pone la foto del catálogo a los que ya existían sin foto. No toca stock ni ubicación ya cargados.
+     */
+    private fun syncCatalog(existing: List<Product>) {
+        val byBarcode = existing.associateBy { it.barcode }
         val batch = db.batch()
-        initial.forEach { batch.set(productsCollection.document(it.id), it.toFirestoreMap()) }
-        batch.commit()
+        var pending = 0
+        PgCatalog.items.forEach { item ->
+            val imageUri = "android.resource://${appContext.packageName}/drawable/${item.imageName}"
+            val current = byBarcode[item.barcode]
+            if (current == null) {
+                val product = Product(
+                    id = "pg_${item.barcode}",
+                    barcode = item.barcode,
+                    name = item.name,
+                    brand = item.brand,
+                    imageUri = imageUri,
+                    stockOnShelf = PgCatalog.INITIAL_STOCK,
+                    locationDetail = item.locationDetail
+                )
+                batch.set(productsCollection.document(product.id), product.toFirestoreMap())
+                pending++
+            } else if (current.imageUri.isBlank()) {
+                batch.update(productsCollection.document(current.id), "imageUri", imageUri)
+                pending++
+            }
+        }
+        if (pending > 0) batch.commit()
     }
 
     /** Vuelve a consultar el estado de la red y devuelve si hay internet. */

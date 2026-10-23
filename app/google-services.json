@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "123456789012",
-    "project_id": "bodega-lider-app",
-    "storage_bucket": "bodega-lider-app.appspot.com"
+    "project_number": "643866914383",
+    "project_id": "bodegalider-1a22c",
+    "storage_bucket": "bodegalider-1a22c.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:123456789012:android:abcdef1234567890",
+        "mobilesdk_app_id": "1:643866914383:android:cf39f04c3cb2b82a5f843a",
         "android_client_info": {
           "package_name": "com.example.bodegalider"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyDummyKeyForBuildVerification123456"
+          "current_key": "AIzaSyCJNw5pHtqR2WXHlUGgG4KY0Qy0gA26CeI"
         }
       ],
       "services": {
