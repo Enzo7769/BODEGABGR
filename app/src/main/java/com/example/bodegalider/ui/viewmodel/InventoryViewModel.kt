@@ -1,21 +1,29 @@
 package com.example.bodegalider.ui.viewmodel
 
 import android.app.Application
+import android.content.Context
+import android.content.res.Configuration
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.bodegalider.R
 import com.example.bodegalider.data.InventoryRepository
+import com.example.bodegalider.model.InventoryStats
 import com.example.bodegalider.model.Product
 import com.example.bodegalider.model.TaskItem
 import com.example.bodegalider.model.User
 import com.example.bodegalider.model.UserRole
+import com.example.bodegalider.util.normalizeForSearch
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import java.util.UUID
 
 enum class AppTab {
     CATALOG,
@@ -26,37 +34,55 @@ enum class AppTab {
     SETTINGS
 }
 
-enum class SortOption {
-    OUT_OF_STOCK_FIRST,
-    LOW_STOCK_FIRST,
-    HIGH_STOCK_FIRST,
-    ALPHABETICAL
+enum class SortOption(val label: String) {
+    OUT_OF_STOCK_FIRST("Críticos primero"),
+    LOW_STOCK_FIRST("Menor stock"),
+    HIGH_STOCK_FIRST("Mayor stock"),
+    ALPHABETICAL("Nombre (A-Z)"),
+    LOCATION("Pasillo")
+}
+
+enum class StockFilter(val label: String) {
+    ALL("Todos"),
+    OUT_OF_STOCK("Sin stock"),
+    LOW("Stock bajo")
+}
+
+sealed interface AlertResult {
+    data object Sent : AlertResult
+    data class OnCooldown(val remainingMinutes: Int) : AlertResult
 }
 
 class InventoryViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = InventoryRepository(application)
+    private val prefs = application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+    // Usuarios de demostración (en producción vendrían de un backend de autenticación)
     private val registeredUsers = listOf(
-        User("u_admin", "Roberto Supervisor", UserRole.ADMIN, "046", "Maipú", true, "Mañana", "Full Time", listOf("Maipú", "Pudahuel")),
-        User("u1", "Carlos Reponedor", UserRole.USER, "046", "Maipú", true, "Mañana", "Full Time"),
-        User("u2", "Ana Pérez", UserRole.USER, "048", "Maipú", true, "Tarde", "Part Time"),
-        User("u3", "Juan Soto", UserRole.USER, "052", "Pudahuel", false, "Noche", "Backup"),
-        User("u4", "María Gómez", UserRole.USER, "060", "Cerrillos", true, "Mañana", "Full Time"),
-        User("u5", "Pedro Alarcón", UserRole.USER, "071", "Stgo Centro", false, "Tarde", "Backup"),
-        User("u6", "Sofía Valdés", UserRole.USER, "046", "Maipú", true, "Noche", "Part Time")
+        User("u_admin", "Roberto Supervisor", UserRole.ADMIN, "046", "Maipú", true, "Mañana", "Full Time", listOf("Maipú", "Pudahuel"), "admin"),
+        User("u1", "Carlos Reponedor", UserRole.USER, "046", "Maipú", true, "Mañana", "Full Time", username = "carlos"),
+        User("u2", "Ana Pérez", UserRole.USER, "048", "Maipú", true, "Tarde", "Part Time", username = "ana"),
+        User("u3", "Juan Soto", UserRole.USER, "052", "Pudahuel", false, "Noche", "Backup", username = "juan"),
+        User("u4", "María Gómez", UserRole.USER, "060", "Cerrillos", true, "Mañana", "Full Time", username = "maria"),
+        User("u5", "Pedro Alarcón", UserRole.USER, "071", "Stgo Centro", false, "Tarde", "Backup", username = "pedro"),
+        User("u6", "Sofía Valdés", UserRole.USER, "046", "Maipú", true, "Noche", "Part Time", username = "sofia")
     )
 
-    private val _currentUser = MutableStateFlow<User?>(null)
+    /** Usuarios que se muestran como acceso rápido en la pantalla de inicio de sesión. */
+    val demoUsers: List<User> = registeredUsers
+
+    private val _currentUser = MutableStateFlow(
+        prefs.getString(KEY_USER_ID, null)?.let { id -> registeredUsers.find { it.id == id } }
+    )
     val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
 
-    private val _teamUsers = MutableStateFlow(registeredUsers.filter { it.role == UserRole.USER })
-    val teamUsers: StateFlow<List<User>> = _teamUsers.asStateFlow()
+    private val teamUsers = MutableStateFlow(registeredUsers.filter { it.role == UserRole.USER })
 
     private val _tasks = MutableStateFlow(
         listOf(
-            TaskItem("t1", "u1", "Carlos Reponedor", "046", "Priorizar rellenar góndola de Lácteos", false, System.currentTimeMillis()),
-            TaskItem("t2", "u2", "Ana Pérez", "048", "Revisar quiebres en abarrotes y actualizar stock", false, System.currentTimeMillis()),
-            TaskItem("t3", "u4", "María Gómez", "060", "Armar cabecera de pasillo principal", true, System.currentTimeMillis())
+            TaskItem("t1", "u1", "Carlos Reponedor", "046", "Priorizar rellenar góndola de lácteos", isPriority = true),
+            TaskItem("t2", "u2", "Ana Pérez", "048", "Revisar quiebres en abarrotes y actualizar stock"),
+            TaskItem("t3", "u4", "María Gómez", "060", "Armar cabecera de pasillo principal", isCompleted = true)
         )
     )
     val tasks: StateFlow<List<TaskItem>> = _tasks.asStateFlow()
@@ -65,23 +91,25 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
     private val _alertStateVersion = MutableStateFlow(0)
     val alertStateVersion: StateFlow<Int> = _alertStateVersion.asStateFlow()
 
-    private val _currentTab = MutableStateFlow(AppTab.CATALOG)
+    private val _currentTab = MutableStateFlow(defaultTabFor(_currentUser.value))
     val currentTab: StateFlow<AppTab> = _currentTab.asStateFlow()
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
+    private val _stockFilter = MutableStateFlow(StockFilter.ALL)
+    val stockFilter: StateFlow<StockFilter> = _stockFilter.asStateFlow()
+
     private val _teamSearchQuery = MutableStateFlow("")
     val teamSearchQuery: StateFlow<String> = _teamSearchQuery.asStateFlow()
 
-    private val _selectedCommuneFilter = MutableStateFlow("Todas")
+    private val _selectedCommuneFilter = MutableStateFlow(ALL_COMMUNES)
     val selectedCommuneFilter: StateFlow<String> = _selectedCommuneFilter.asStateFlow()
 
     private val _sortOption = MutableStateFlow(SortOption.OUT_OF_STOCK_FIRST)
     val sortOption: StateFlow<SortOption> = _sortOption.asStateFlow()
 
-    private val _selectedProduct = MutableStateFlow<Product?>(null)
-    val selectedProduct: StateFlow<Product?> = _selectedProduct.asStateFlow()
+    private val _selectedProductId = MutableStateFlow<String?>(null)
 
     private val _isAddProductDialogOpen = MutableStateFlow(false)
     val isAddProductDialogOpen: StateFlow<Boolean> = _isAddProductDialogOpen.asStateFlow()
@@ -89,11 +117,26 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
     private val _scannedBarcodeForNew = MutableStateFlow("")
     val scannedBarcodeForNew: StateFlow<String> = _scannedBarcodeForNew.asStateFlow()
 
-    private val _isDarkMode = MutableStateFlow(true)
+    private val _isDarkMode = MutableStateFlow(
+        if (prefs.contains(KEY_DARK_MODE)) prefs.getBoolean(KEY_DARK_MODE, false) else isSystemDark(application)
+    )
     val isDarkMode: StateFlow<Boolean> = _isDarkMode.asStateFlow()
 
+    private val _messages = Channel<String>(Channel.BUFFERED)
+    /** Mensajes cortos para mostrar en un Snackbar. */
+    val messages: Flow<String> = _messages.receiveAsFlow()
+
     val products: StateFlow<List<Product>> = repository.products
+    val isLoading: StateFlow<Boolean> = repository.isLoading
     val isOnline: StateFlow<Boolean> = repository.isOnline
+
+    val selectedProduct: StateFlow<Product?> = combine(products, _selectedProductId) { list, id ->
+        id?.let { selected -> list.find { it.id == selected } }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val inventoryStats: StateFlow<InventoryStats> = products
+        .map { InventoryStats.from(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), InventoryStats())
 
     init {
         cleanExpiredTasks()
@@ -107,130 +150,167 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    val filteredProducts: StateFlow<List<Product>> = combine(products, searchQuery, sortOption) { list, query, sort ->
-        val filtered = if (query.isBlank()) list
-        else list.filter {
-            it.name.contains(query, ignoreCase = true) ||
-                    it.barcode.contains(query) ||
-                    it.brand.contains(query, ignoreCase = true) ||
-                    it.aisle.contains(query, ignoreCase = true) ||
-                    it.locationDetail.contains(query, ignoreCase = true)
-        }
+    val filteredProducts: StateFlow<List<Product>> =
+        combine(products, searchQuery, sortOption, stockFilter) { list, query, sort, filter ->
+            val needle = query.normalizeForSearch()
+            val filtered = list.filter { product ->
+                val matchesFilter = when (filter) {
+                    StockFilter.ALL -> true
+                    StockFilter.OUT_OF_STOCK -> product.isQuiebre
+                    StockFilter.LOW -> product.isLowStock
+                }
+                val matchesQuery = needle.isBlank() ||
+                    product.name.normalizeForSearch().contains(needle) ||
+                    product.brand.normalizeForSearch().contains(needle) ||
+                    product.barcode.contains(needle) ||
+                    product.aisle.normalizeForSearch().contains(needle) ||
+                    product.locationDetail.normalizeForSearch().contains(needle)
+                matchesFilter && matchesQuery
+            }
+            sortProducts(filtered, sort)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-        when (sort) {
-            SortOption.OUT_OF_STOCK_FIRST -> filtered.sortedWith(
-                compareBy<Product> { !it.isOutOfStock && it.stockOnShelf > 0 }
-                    .thenBy { it.stockOnShelf }
-            )
-            SortOption.LOW_STOCK_FIRST -> filtered.sortedBy { it.stockOnShelf }
-            SortOption.HIGH_STOCK_FIRST -> filtered.sortedByDescending { it.stockOnShelf }
-            SortOption.ALPHABETICAL -> filtered.sortedBy { it.name }
-        }
+    /** Productos que necesitan atención, del más crítico al menos crítico. */
+    val restockProducts: StateFlow<List<Product>> = products
+        .map { list -> sortProducts(list.filter { it.needsRestock }, SortOption.OUT_OF_STOCK_FIRST) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Reponedores bajo el cargo del supervisor actual (sin filtros de búsqueda). */
+    val managedWorkers: StateFlow<List<User>> = combine(currentUser, teamUsers) { admin, list ->
+        if (admin?.role == UserRole.ADMIN) list.filter { it.commune in admin.managedCommunes } else list
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val filteredTeamUsers: StateFlow<List<User>> = combine(currentUser, teamUsers, teamSearchQuery, selectedCommuneFilter) { admin, list, query, commune ->
-        val allowedList = if (admin?.role == UserRole.ADMIN) {
-            list.filter { worker -> admin.managedCommunes.contains(worker.commune) }
-        } else {
-            list
-        }
+    val availableCommunes: StateFlow<List<String>> = managedWorkers
+        .map { workers -> listOf(ALL_COMMUNES) + workers.map { it.commune }.distinct().sorted() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf(ALL_COMMUNES))
 
-        allowedList.filter { user ->
-            val matchesQuery = query.isBlank() || user.name.contains(query, ignoreCase = true) || user.storeCode.contains(query)
-            val matchesCommune = commune == "Todas" || user.commune.equals(commune, ignoreCase = true)
-            matchesQuery && matchesCommune
+    val filteredTeamUsers: StateFlow<List<User>> =
+        combine(managedWorkers, teamSearchQuery, selectedCommuneFilter) { list, query, commune ->
+            val needle = query.normalizeForSearch()
+            list.filter { user ->
+                val matchesQuery = needle.isBlank() ||
+                    user.name.normalizeForSearch().contains(needle) ||
+                    user.storeCode.contains(needle)
+                val matchesCommune = commune == ALL_COMMUNES || user.commune.equals(commune, ignoreCase = true)
+                matchesQuery && matchesCommune
+            }.sortedWith(compareByDescending<User> { it.isOnline }.thenBy { it.name })
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Tareas visibles para el usuario actual: las propias o, para el supervisor, las de su equipo. */
+    val visibleTasks: StateFlow<List<TaskItem>> = combine(currentUser, tasks, managedWorkers) { user, list, workers ->
+        val visible = when {
+            user == null -> emptyList()
+            user.role == UserRole.ADMIN -> {
+                val ids = workers.map { it.id }.toSet()
+                list.filter { it.userId in ids }
+            }
+            user.role == UserRole.SUPER_ADMIN -> list
+            else -> list.filter { it.userId == user.id }
         }
+        visible.sortedWith(compareBy<TaskItem> { it.isCompleted }.thenByDescending { it.timestamp })
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val outOfStockProducts: StateFlow<List<Product>> = products.stateIn(
-        viewModelScope,
-        SharingStarted.WhileSubscribed(5000),
-        emptyList()
-    )
-
-    fun isAlertOnCooldown(userId: String, productId: String): Boolean {
-        val key = "${userId}_$productId"
-        val lastTime = lastAlertTimestamps[key] ?: 0L
-        val oneHourMillis = 60 * 60 * 1000L
-        return System.currentTimeMillis() - lastTime < oneHourMillis
+    private fun sortProducts(list: List<Product>, sort: SortOption): List<Product> = when (sort) {
+        SortOption.OUT_OF_STOCK_FIRST -> list.sortedWith(
+            compareBy<Product> { it.stockStatus.ordinal }
+                .thenByDescending { it.quantityNeeded }
+                .thenBy { it.stockOnShelf }
+        )
+        SortOption.LOW_STOCK_FIRST -> list.sortedBy { it.stockOnShelf }
+        SortOption.HIGH_STOCK_FIRST -> list.sortedByDescending { it.stockOnShelf }
+        SortOption.ALPHABETICAL -> list.sortedBy { it.name.normalizeForSearch() }
+        SortOption.LOCATION -> list.sortedWith(
+            compareBy<Product> { it.aisle.isBlank() }
+                .thenBy { it.aisle.filter(Char::isDigit).toIntOrNull() ?: Int.MAX_VALUE }
+                .thenBy { it.aisle }
+                .thenBy { it.locationDetail }
+        )
     }
 
-    fun sendPriorityAlert(userId: String, userName: String, storeCode: String, product: Product): Pair<Boolean, Int> {
-        val key = "${userId}_${product.id}"
-        val lastTime = lastAlertTimestamps[key] ?: 0L
-        val oneHourMillis = 60 * 60 * 1000L
-        val currentTime = System.currentTimeMillis()
-        val elapsed = currentTime - lastTime
+    fun isAlertOnCooldown(userId: String, productId: String): Boolean {
+        val lastTime = lastAlertTimestamps["${userId}_$productId"] ?: 0L
+        return System.currentTimeMillis() - lastTime < ALERT_COOLDOWN_MILLIS
+    }
 
-        if (elapsed < oneHourMillis) {
-            val remainingMinutes = ((oneHourMillis - elapsed) / (60 * 1000L)).toInt() + 1
-            return Pair(false, remainingMinutes)
+    fun sendPriorityAlert(worker: User, product: Product): AlertResult {
+        val key = "${worker.id}_${product.id}"
+        val currentTime = System.currentTimeMillis()
+        val elapsed = currentTime - (lastAlertTimestamps[key] ?: 0L)
+
+        if (elapsed < ALERT_COOLDOWN_MILLIS) {
+            val remainingMinutes = ((ALERT_COOLDOWN_MILLIS - elapsed) / 60_000L).toInt() + 1
+            return AlertResult.OnCooldown(remainingMinutes)
         }
 
         lastAlertTimestamps[key] = currentTime
         _alertStateVersion.update { it + 1 }
-        val taskTitle = "🚨 ¡ALERTA DE PRIORIDAD! Rellenar ${product.brand} ${product.name} (${product.locationText})"
-        assignTask(userId, userName, storeCode, taskTitle)
-        return Pair(true, 0)
+        val taskTitle = "Reponer ${product.displayName} · ${product.locationText}" +
+            if (product.quantityNeeded > 0) " (${product.quantityNeeded} un.)" else ""
+        assignTask(worker, taskTitle, isPriority = true)
+        return AlertResult.Sent
     }
 
-    fun assignTask(userId: String, userName: String, storeCode: String, title: String) {
+    fun assignTask(worker: User, title: String, isPriority: Boolean = false) {
+        val clean = title.trim()
+        if (clean.isEmpty()) return
         val newTask = TaskItem(
-            id = System.currentTimeMillis().toString(),
-            userId = userId,
-            userName = userName,
-            storeCode = storeCode,
-            title = title.trim(),
-            isCompleted = false,
-            timestamp = System.currentTimeMillis()
+            id = UUID.randomUUID().toString(),
+            userId = worker.id,
+            userName = worker.name,
+            storeCode = worker.storeCode,
+            title = clean,
+            isPriority = isPriority
         )
         _tasks.update { listOf(newTask) + it }
     }
 
-    fun completeTask(taskId: String) {
+    fun toggleTaskCompleted(taskId: String) {
+        var completedNow = false
         _tasks.update { list ->
             list.map { task ->
-                if (task.id == taskId) task.copy(isCompleted = !task.isCompleted) else task
+                if (task.id == taskId) {
+                    completedNow = !task.isCompleted
+                    task.copy(isCompleted = !task.isCompleted)
+                } else {
+                    task
+                }
             }
         }
+        if (completedNow) postMessage("Tarea marcada como completada")
     }
 
-    fun login(name: String, role: UserRole, storeCode: String, commune: String, shift: String, contractType: String, managedCommunes: List<String> = emptyList()) {
-        _currentUser.value = User(
-            id = System.currentTimeMillis().toString(),
-            name = name,
-            role = role,
-            storeCode = storeCode,
-            commune = commune,
-            isOnline = true,
-            shift = shift,
-            contractType = contractType,
-            managedCommunes = managedCommunes
-        )
-    }
-
+    /** Busca un usuario por su nombre de usuario o nombre (sin importar tildes ni mayúsculas). */
     fun loginWithUsername(username: String): Boolean {
-        val clean = username.trim().lowercase()
-        val found = when (clean) {
-            "admin", "supervisor", "roberto" -> registeredUsers.find { it.role == UserRole.ADMIN }
-            "carlos" -> registeredUsers.find { it.name.contains("Carlos", true) }
-            "ana" -> registeredUsers.find { it.name.contains("Ana", true) }
-            "juan" -> registeredUsers.find { it.name.contains("Juan", true) }
-            "maria" -> registeredUsers.find { it.name.contains("María", true) }
-            "pedro" -> registeredUsers.find { it.name.contains("Pedro", true) }
-            "sofia" -> registeredUsers.find { it.name.contains("Sofía", true) }
-            else -> registeredUsers.find { it.name.equals(clean, true) }
-        }
+        val clean = username.normalizeForSearch()
+        if (clean.isEmpty()) return false
+        val found = registeredUsers.find { user ->
+            user.username == clean ||
+                user.name.normalizeForSearch() == clean ||
+                user.name.normalizeForSearch().substringBefore(" ") == clean
+        } ?: if (clean == "supervisor" || clean == "roberto") registeredUsers.find { it.role == UserRole.ADMIN } else null
 
         if (found != null) {
-            _currentUser.value = found
+            loginAs(found)
             return true
         }
         return false
     }
 
+    fun loginAs(user: User) {
+        _currentUser.value = user
+        _currentTab.value = defaultTabFor(user)
+        prefs.edit().putString(KEY_USER_ID, user.id).apply()
+    }
+
     fun logout() {
         _currentUser.value = null
+        _searchQuery.value = ""
+        _teamSearchQuery.value = ""
+        _selectedCommuneFilter.value = ALL_COMMUNES
+        _stockFilter.value = StockFilter.ALL
+        _selectedProductId.value = null
+        closeAddProductDialog()
+        prefs.edit().remove(KEY_USER_ID).apply()
     }
 
     fun setTeamSearchQuery(query: String) {
@@ -245,12 +325,21 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
         _sortOption.value = option
     }
 
+    fun setStockFilter(filter: StockFilter) {
+        _stockFilter.value = filter
+    }
+
     fun toggleDarkMode(enabled: Boolean) {
         _isDarkMode.value = enabled
+        prefs.edit().putBoolean(KEY_DARK_MODE, enabled).apply()
     }
 
     fun refreshNetworkStatus() {
-        repository.refreshConnectivity()
+        val online = repository.refreshConnectivity()
+        postMessage(
+            if (online) "Conectado: los cambios se sincronizan con la nube"
+            else "Sin conexión: los cambios quedan guardados en el equipo"
+        )
     }
 
     fun setTab(tab: AppTab) {
@@ -262,23 +351,24 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun selectProduct(product: Product?) {
-        _selectedProduct.value = product
+        _selectedProductId.value = product?.id
     }
 
     fun adjustStock(productId: String, delta: Int) {
         repository.adjustStock(productId, delta)
     }
 
-    fun updateStock(productId: String, stock: Int, needed: Int, isQuiebre: Boolean, aisle: String, locationDetail: String) {
-        repository.updateStock(productId, stock, needed, isQuiebre, aisle, locationDetail)
+    fun updateProduct(product: Product) {
+        repository.updateProduct(product)
+        postMessage("Cambios guardados")
     }
 
-    fun handleScannedBarcode(barcode: String): Product? {
-        val existing = repository.getProductByBarcode(barcode)
-        return existing
-    }
+    fun findProductByBarcode(barcode: String): Product? = repository.getProductByBarcode(barcode)
 
-    fun openAddProductWithBarcode(barcode: String) {
+    fun isBarcodeTaken(barcode: String, exceptProductId: String? = null): Boolean =
+        products.value.any { it.barcode == barcode.trim() && it.id != exceptProductId }
+
+    fun openAddProduct(barcode: String = "") {
         _scannedBarcodeForNew.value = barcode
         _isAddProductDialogOpen.value = true
     }
@@ -288,21 +378,42 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
         _scannedBarcodeForNew.value = ""
     }
 
-    fun addNewProduct(barcode: String, name: String, brand: String, stock: Int, needed: Int, imageUri: String, isQuiebre: Boolean, aisle: String, locationDetail: String) {
-        val newProduct = Product(
-            id = System.currentTimeMillis().toString(),
-            barcode = barcode,
-            name = name,
-            brand = brand,
-            imageResId = if (imageUri.isEmpty()) R.drawable.baked_goods_1 else 0,
-            imageUri = imageUri,
-            stockOnShelf = stock,
-            quantityNeeded = needed,
-            isOutOfStock = isQuiebre || stock <= 0,
-            aisle = aisle.trim(),
-            locationDetail = locationDetail.trim()
+    fun addNewProduct(product: Product) {
+        val newProduct = product.copy(
+            id = UUID.randomUUID().toString(),
+            barcode = product.barcode.trim(),
+            name = product.name.trim(),
+            brand = product.brand.trim(),
+            isOutOfStock = product.isOutOfStock || product.stockOnShelf <= 0,
+            aisle = product.aisle.trim(),
+            locationDetail = product.locationDetail.trim()
         )
         repository.addProduct(newProduct)
         closeAddProductDialog()
+        postMessage("Producto \"${newProduct.name}\" registrado")
+    }
+
+    fun postMessage(message: String) {
+        _messages.trySend(message)
+    }
+
+    override fun onCleared() {
+        repository.close()
+        super.onCleared()
+    }
+
+    private fun defaultTabFor(user: User?): AppTab =
+        if (user?.isSupervisor == true) AppTab.TEAM else AppTab.CATALOG
+
+    private fun isSystemDark(application: Application): Boolean =
+        (application.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES
+
+    companion object {
+        const val ALL_COMMUNES = "Todas"
+        private const val PREFS_NAME = "bodega_lider_prefs"
+        private const val KEY_USER_ID = "current_user_id"
+        private const val KEY_DARK_MODE = "dark_mode"
+        private const val ALERT_COOLDOWN_MILLIS = 60 * 60 * 1000L
     }
 }
