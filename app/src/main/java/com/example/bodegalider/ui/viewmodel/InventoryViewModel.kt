@@ -3,6 +3,7 @@ package com.example.bodegalider.ui.viewmodel
 import android.app.Application
 import android.content.Context
 import android.content.res.Configuration
+import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bodegalider.data.InventoryRepository
@@ -299,7 +300,7 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
     fun loginAs(user: User) {
         _currentUser.value = user
         _currentTab.value = defaultTabFor(user)
-        prefs.edit().putString(KEY_USER_ID, user.id).apply()
+        prefs.edit { putString(KEY_USER_ID, user.id) }
     }
 
     fun logout() {
@@ -310,7 +311,7 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
         _stockFilter.value = StockFilter.ALL
         _selectedProductId.value = null
         closeAddProductDialog()
-        prefs.edit().remove(KEY_USER_ID).apply()
+        prefs.edit { remove(KEY_USER_ID) }
     }
 
     fun setTeamSearchQuery(query: String) {
@@ -331,7 +332,7 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun toggleDarkMode(enabled: Boolean) {
         _isDarkMode.value = enabled
-        prefs.edit().putBoolean(KEY_DARK_MODE, enabled).apply()
+        prefs.edit { putBoolean(KEY_DARK_MODE, enabled) }
     }
 
     fun refreshNetworkStatus() {
@@ -362,8 +363,6 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
         repository.updateProduct(product)
         postMessage("Cambios guardados")
     }
-
-    fun findProductByBarcode(barcode: String): Product? = repository.getProductByBarcode(barcode)
 
     fun isBarcodeTaken(barcode: String, exceptProductId: String? = null): Boolean =
         products.value.any { it.barcode == barcode.trim() && it.id != exceptProductId }

@@ -170,11 +170,6 @@ class InventoryRepository(context: Context) {
         productsCollection.document(product.id).set(product.toFirestoreMap())
     }
 
-    fun getProductByBarcode(barcode: String): Product? {
-        val clean = barcode.trim()
-        return _products.value.find { it.barcode == clean }
-    }
-
     fun close() {
         listenerRegistration.remove()
         try {
