@@ -12,14 +12,32 @@ android {
         applicationId = "com.example.bodegalider"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
+        // En GitHub Actions se usa el número de ejecución para que cada versión sea mayor que la anterior
+        versionCode = providers.environmentVariable("VERSION_CODE").orNull?.toInt() ?: 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Clave fija para firmar las versiones que se distribuyen por Firebase App Distribution.
+    // Solo se activa cuando las variables de entorno existen (en GitHub Actions).
+    val keystorePath = providers.environmentVariable("KEYSTORE_PATH").orNull
+    signingConfigs {
+        if (keystorePath != null) {
+            create("distribucion") {
+                storeFile = file(keystorePath)
+                storePassword = providers.environmentVariable("KEYSTORE_PASSWORD").orNull
+                keyAlias = providers.environmentVariable("KEY_ALIAS").orNull
+                keyPassword = providers.environmentVariable("KEY_PASSWORD").orNull
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (keystorePath != null) {
+                signingConfig = signingConfigs.getByName("distribucion")
+            }
             optimization {
                 enable = false
             }

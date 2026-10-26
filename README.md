@@ -73,3 +73,29 @@ app/src/main/java/com/example/bodegalider/
 ```
 
 Los tests unitarios cubren la lógica de estados de stock, el resumen de inventario y la búsqueda sin tildes.
+
+## Actualizaciones automáticas en el celular
+
+Cada push a `main` ejecuta `.github/workflows/distribuir.yml`. Ese workflow compila el APK firmado y lo sube a **Firebase App Distribution**, y la actualización llega al celular a través de la app **Firebase App Tester**.
+
+Configuración (una sola vez):
+
+1. **Testers:** en Firebase → App Distribution → *Verificadores y grupos*, crea un grupo con alias `testers` y agrega tu correo.
+2. **Clave de firma:** genérala en tu PC (guárdala bien; si la pierdes, habrá que reinstalar la app):
+   ```powershell
+   & "C:\Program Files\Android\Android Studio\jbr\bin\keytool.exe" -genkeypair -v -keystore distribucion.jks -keyalg RSA -keysize 2048 -validity 10000 -alias bodega
+   [Convert]::ToBase64String([IO.File]::ReadAllBytes("distribucion.jks")) | Set-Clipboard
+   ```
+3. **Cuenta de servicio:** en Google Cloud → IAM → Cuentas de servicio, crea una con el rol *Firebase App Distribution Admin* y descarga su clave JSON.
+4. **Secretos en GitHub** (*Settings → Secrets and variables → Actions*):
+
+   | Secreto | Valor |
+   |---|---|
+   | `KEYSTORE_BASE64` | El texto copiado en el paso 2 |
+   | `KEYSTORE_PASSWORD` | Contraseña del keystore |
+   | `KEY_ALIAS` | `bodega` |
+   | `KEY_PASSWORD` | Contraseña de la clave (la misma si no pusiste otra) |
+   | `FIREBASE_SERVICE_ACCOUNT` | Contenido completo del JSON del paso 3 |
+   | `FIREBASE_APP_ID` | ID de la app Android (*Configuración del proyecto → Tus apps*, empieza con `1:`) |
+
+La primera vez, desinstala la versión instalada desde Android Studio, porque su firma es distinta. Las versiones siguientes se instalan encima.
