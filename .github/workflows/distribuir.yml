@@ -47,6 +47,27 @@ jobs:
             exit 1
           fi
 
+      - name: Revisar cuenta de servicio
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if ! printf '%s' "$FIREBASE_SERVICE_ACCOUNT" | jq -e . > /dev/null 2>&1; then
+            echo "::error::FIREBASE_SERVICE_ACCOUNT no es un JSON válido. Pega el contenido completo del archivo .json, desde la primera { hasta la última }"
+            exit 1
+          fi
+          tipo=$(printf '%s' "$FIREBASE_SERVICE_ACCOUNT" | jq -r '.type // empty')
+          if [ "$tipo" != "service_account" ]; then
+            echo "::error::FIREBASE_SERVICE_ACCOUNT no es una clave de cuenta de servicio (type='$tipo'). Usa el .json descargado en Google Cloud > Cuentas de servicio > Claves, no google-services.json"
+            exit 1
+          fi
+          for campo in private_key client_email project_id; do
+            if [ -z "$(printf '%s' "$FIREBASE_SERVICE_ACCOUNT" | jq -r ".$campo // empty")" ]; then
+              echo "::error::Al JSON de FIREBASE_SERVICE_ACCOUNT le falta el campo '$campo'"
+              exit 1
+            fi
+          done
+          echo "Proyecto de la cuenta de servicio: $(printf '%s' "$FIREBASE_SERVICE_ACCOUNT" | jq -r .project_id)"
+
       # El nombre del paquete puede ser android-37 o llevar versión menor (android-37.0), así que se busca en la lista
       - name: Instalar plataforma Android 37
         run: |
@@ -73,14 +94,20 @@ jobs:
       - name: Compilar APK
         run: ./gradlew assembleRelease --console=plain
 
+      - name: Autenticar con Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
       - name: Subir a Firebase App Distribution
         env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
           COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
-          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase.json"
-          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$GOOGLE_APPLICATION_CREDENTIALS"
           printf '%s' "${COMMIT_MESSAGE:-Compilación manual}" > "$RUNNER_TEMP/notas.txt"
           npx --yes firebase-tools@14.2.0 appdistribution:distribute \
             app/build/outputs/apk/release/app-release.apk \
