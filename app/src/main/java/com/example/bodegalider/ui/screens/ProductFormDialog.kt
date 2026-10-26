@@ -41,6 +41,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.bodegalider.model.Product
 import com.example.bodegalider.ui.components.ProductImage
+import com.example.bodegalider.ui.components.ScannableBarcode
 import com.example.bodegalider.ui.components.SectionTitle
 
 /**
@@ -103,6 +104,11 @@ fun ProductFormDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                // Al abrir un producto existente se muestra su código listo para pistolear
+                if (!barcodeEditable) {
+                    ScannableBarcode(code = initial.barcode)
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,

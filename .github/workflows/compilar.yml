@@ -1,0 +1,40 @@
+# Compila la app y corre los tests en cada pull request a main, antes de hacer merge.
+name: Compilar
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: compilar-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  compilar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Instalar Java 25
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - uses: gradle/actions/setup-gradle@v5
+
+      # El nombre del paquete puede ser android-37 o llevar versión menor (android-37.0), así que se busca en la lista
+      - name: Instalar plataforma Android 37
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          paquete=$("$SDKMANAGER" --list 2>/dev/null | awk '{print $1}' | grep -E '^platforms;android-37(\.[0-9]+)?$' | sort -uV | tail -n 1)
+          if [ -z "$paquete" ]; then
+            echo "::warning::No se encontró la plataforma 37 en sdkmanager; Gradle intentará descargarla"
+            exit 0
+          fi
+          yes | "$SDKMANAGER" "$paquete" > /dev/null || true
+
+      - name: Compilar y correr tests
+        run: ./gradlew assembleDebug testDebugUnitTest --console=plain
