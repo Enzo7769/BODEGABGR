@@ -1,7 +1,11 @@
 package com.example.bodegalider.ui.screens
 
+import android.Manifest
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -16,7 +20,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -31,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,10 +45,13 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import com.example.bodegalider.model.Product
 import com.example.bodegalider.ui.components.ProductImage
 import com.example.bodegalider.ui.components.ScannableBarcode
 import com.example.bodegalider.ui.components.SectionTitle
+import java.io.File
 
 /**
  * Formulario compartido para registrar y editar productos.
@@ -83,6 +92,35 @@ fun ProductFormDialog(
         }
     }
 
+    // Archivo donde la cámara deja la foto; se guarda como texto para sobrevivir si Android cierra la app
+    var cameraFileUri by rememberSaveable { mutableStateOf<String?>(null) }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { saved ->
+        val uri = cameraFileUri
+        if (saved && uri != null) imageUri = uri
+    }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            val uri = newCameraPhotoUri(context)
+            cameraFileUri = uri.toString()
+            cameraLauncher.launch(uri)
+        } else {
+            Toast.makeText(context, "Se necesita permiso de cámara para tomar la foto", Toast.LENGTH_SHORT).show()
+        }
+    }
+    val takePhoto = {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            val uri = newCameraPhotoUri(context)
+            cameraFileUri = uri.toString()
+            cameraLauncher.launch(uri)
+        } else {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
     val barcodeError = when {
         barcode.isBlank() -> "Ingresa el código de barras"
         barcodeEditable && isBarcodeTaken(barcode) -> "Este código ya está registrado"
@@ -117,12 +155,20 @@ fun ProductFormDialog(
                     ProductImage(imageUri = imageUri, contentDescription = "Foto del producto", size = 72.dp)
                     Column(modifier = Modifier.weight(1f)) {
                         OutlinedButton(
+                            onClick = takePhoto,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.PhotoCamera, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Tomar foto")
+                        }
+                        OutlinedButton(
                             onClick = { photoLauncher.launch(arrayOf("image/*")) },
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(Icons.Default.AddAPhoto, contentDescription = null)
+                            Icon(Icons.Default.PhotoLibrary, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(if (imageUri.isBlank()) "Agregar foto" else "Cambiar foto")
+                            Text("Galería")
                         }
                         if (imageUri.isNotBlank()) {
                             TextButton(onClick = { imageUri = "" }) { Text("Quitar foto") }
@@ -265,4 +311,11 @@ fun ProductFormDialog(
             TextButton(onClick = onDismiss) { Text("Cancelar") }
         }
     )
+}
+
+/** Archivo temporal donde la cámara guarda la foto; luego se comprime y se sube a la nube. */
+private fun newCameraPhotoUri(context: Context): Uri {
+    val file = File(context.cacheDir, "camera/foto_${System.currentTimeMillis()}.jpg")
+    file.parentFile?.mkdirs()
+    return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
 }

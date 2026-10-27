@@ -7,6 +7,8 @@ import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bodegalider.data.InventoryRepository
+import com.example.bodegalider.data.ProductPhotos
+import com.example.bodegalider.model.CloudPhoto
 import com.example.bodegalider.model.InventoryStats
 import com.example.bodegalider.model.Product
 import com.example.bodegalider.model.TaskItem
@@ -20,10 +22,12 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import java.util.UUID
 
 enum class AppTab {
@@ -56,6 +60,7 @@ sealed interface AlertResult {
 
 class InventoryViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = InventoryRepository(application)
+    private val photos = ProductPhotos(application)
     private val prefs = application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     // Usuarios de demostración (en producción vendrían de un backend de autenticación)
@@ -141,6 +146,21 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
 
     init {
         cleanExpiredTasks()
+        uploadLocalPhotos()
+    }
+
+    /**
+     * Sube a la nube las fotos guardadas antes de que existiera el respaldo, que solo quedaron
+     * en el celular donde se eligieron. Solo funciona en ese equipo, porque es el único que puede leerlas.
+     */
+    private fun uploadLocalPhotos() {
+        viewModelScope.launch {
+            val localOnly = products.first { it.isNotEmpty() }.filter { CloudPhoto.isLocalOnly(it.imageUri) }
+            localOnly.forEach { product ->
+                val imageUri = photos.upload(product.id, product.imageUri)
+                if (imageUri != product.imageUri) repository.updateImageUri(product.id, imageUri)
+            }
+        }
     }
 
     private fun cleanExpiredTasks() {
@@ -360,8 +380,24 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun updateProduct(product: Product) {
-        repository.updateProduct(product)
+        val previousUri = products.value.find { it.id == product.id }?.imageUri.orEmpty()
+        if (product.imageUri.isBlank() && CloudPhoto.parse(previousUri) != null) photos.delete(product.id)
+        withUploadedPhoto(product) { repository.updateProduct(it) }
         postMessage("Cambios guardados")
+    }
+
+    /**
+     * Si el producto trae una foto recién tomada o elegida, la sube antes de guardarlo.
+     * Sin foto nueva se guarda al instante, para no perder cambios si se cierra la app.
+     */
+    private fun withUploadedPhoto(product: Product, save: (Product) -> Unit) {
+        if (!CloudPhoto.isLocalOnly(product.imageUri)) {
+            save(product)
+            return
+        }
+        viewModelScope.launch {
+            save(product.copy(imageUri = photos.upload(product.id, product.imageUri)))
+        }
     }
 
     fun isBarcodeTaken(barcode: String, exceptProductId: String? = null): Boolean =
@@ -387,7 +423,7 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
             aisle = product.aisle.trim(),
             locationDetail = product.locationDetail.trim()
         )
-        repository.addProduct(newProduct)
+        withUploadedPhoto(newProduct) { repository.addProduct(it) }
         closeAddProductDialog()
         postMessage("Producto \"${newProduct.name}\" registrado")
     }

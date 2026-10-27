@@ -11,7 +11,7 @@ data class Product(
     val barcode: String,
     val name: String,
     val brand: String,
-    val imageUri: String = "", // URI de la foto elegida desde la galería
+    val imageUri: String = "", // Foto: en la nube (cloud://), del catálogo o recién tomada en este equipo
     val stockOnShelf: Int = 0, // Cantidad actual en góndola
     val quantityNeeded: Int = 0, // Cantidad faltante por rellenar
     val isOutOfStock: Boolean = false, // Quiebre confirmado (no hay en bodega ni viene en camino)
