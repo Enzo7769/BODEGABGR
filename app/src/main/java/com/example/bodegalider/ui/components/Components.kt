@@ -1,6 +1,7 @@
 package com.example.bodegalider.ui.components
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.foundation.BorderStroke
@@ -47,6 +48,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.example.bodegalider.data.ProductPhotos
+import com.example.bodegalider.model.CloudPhoto
 import com.example.bodegalider.model.StockStatus
 import com.example.bodegalider.model.User
 import com.example.bodegalider.ui.theme.statusColors
@@ -128,8 +131,8 @@ fun Pill(text: String, container: Color, content: Color, modifier: Modifier = Mo
 }
 
 /**
- * Foto del producto. Carga la imagen elegida desde la galería en segundo plano;
- * si no hay foto (o no se puede leer en este equipo) muestra un ícono neutro.
+ * Foto del producto. Carga en segundo plano la foto guardada en la nube, la del catálogo
+ * o la recién elegida en este equipo; si no hay foto (o no se puede leer) muestra un ícono neutro.
  */
 @Composable
 fun ProductImage(
@@ -140,7 +143,7 @@ fun ProductImage(
 ) {
     val context = LocalContext.current
     val bitmap by produceState<ImageBitmap?>(initialValue = null, imageUri) {
-        value = if (imageUri.isBlank()) null else withContext(Dispatchers.IO) { loadThumbnail(context, imageUri) }
+        value = if (imageUri.isBlank()) null else loadThumbnail(context, imageUri)
     }
 
     Box(
@@ -169,18 +172,32 @@ fun ProductImage(
     }
 }
 
-private fun loadThumbnail(context: Context, uriString: String, targetPx: Int = 320): ImageBitmap? =
-    runCatching {
+private suspend fun loadThumbnail(context: Context, uriString: String, targetPx: Int = 320): ImageBitmap? {
+    val cloudPhoto = CloudPhoto.parse(uriString)
+    if (cloudPhoto != null) {
+        val bytes = ProductPhotos(context).load(cloudPhoto) ?: return null
+        return withContext(Dispatchers.Default) {
+            decodeSampled(targetPx) { options -> BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) }
+        }
+    }
+    return withContext(Dispatchers.IO) {
         val uri = Uri.parse(uriString)
-        val resolver = context.contentResolver
+        decodeSampled(targetPx) { options ->
+            context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+        }
+    }
+}
+
+/** Decodifica la imagen reducida a cerca de [targetPx] para no cargar fotos enteras en memoria. */
+private fun decodeSampled(targetPx: Int, decode: (BitmapFactory.Options) -> Bitmap?): ImageBitmap? =
+    runCatching {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        decode(bounds)
         var sample = 1
         while (bounds.outWidth / (sample * 2) >= targetPx && bounds.outHeight / (sample * 2) >= targetPx) {
             sample *= 2
         }
-        val options = BitmapFactory.Options().apply { inSampleSize = sample }
-        resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }?.asImageBitmap()
+        decode(BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
     }.getOrNull()
 
 /** Avatar circular con iniciales y punto de estado en línea. */

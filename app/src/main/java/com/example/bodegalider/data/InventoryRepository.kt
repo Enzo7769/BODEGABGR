@@ -181,6 +181,10 @@ class InventoryRepository(context: Context) {
         )
     }
 
+    fun updateImageUri(productId: String, imageUri: String) {
+        productsCollection.document(productId).update("imageUri", imageUri)
+    }
+
     fun addProduct(product: Product) {
         productsCollection.document(product.id).set(product.toFirestoreMap())
     }
