@@ -25,6 +25,11 @@ import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -51,10 +56,13 @@ import com.example.bodegalider.model.Product
 import com.example.bodegalider.ui.components.ProductImage
 import com.example.bodegalider.ui.components.ScannableBarcode
 import com.example.bodegalider.ui.components.SectionTitle
+import com.example.bodegalider.util.brandSuggestions
+import com.example.bodegalider.util.canonicalBrand
 import java.io.File
 
 /**
  * Formulario compartido para registrar y editar productos.
+ * [brands] son las marcas que se ofrecen para elegir en vez de escribirlas.
  * [isBarcodeTaken] permite validar que el código no esté asignado a otro producto.
  */
 @Composable
@@ -63,6 +71,7 @@ fun ProductFormDialog(
     confirmLabel: String,
     initial: Product,
     barcodeEditable: Boolean,
+    brands: List<String>,
     isBarcodeTaken: (String) -> Boolean,
     onDismiss: () -> Unit,
     onSave: (Product) -> Unit
@@ -189,15 +198,11 @@ fun ProductFormDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                OutlinedTextField(
+                BrandField(
                     value = brand,
                     onValueChange = { brand = it },
-                    label = { Text("Marca") },
-                    isError = showErrors && brandError != null,
-                    supportingText = if (showErrors && brandError != null) ({ Text(brandError) }) else null,
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
-                    modifier = Modifier.fillMaxWidth()
+                    brands = brands,
+                    error = if (showErrors) brandError else null
                 )
 
                 OutlinedTextField(
@@ -293,7 +298,7 @@ fun ProductFormDialog(
                         initial.copy(
                             barcode = barcode.trim(),
                             name = name.trim(),
-                            brand = brand.trim(),
+                            brand = canonicalBrand(brands, brand),
                             imageUri = imageUri,
                             stockOnShelf = stockValue,
                             quantityNeeded = needed.toIntOrNull() ?: 0,
@@ -318,4 +323,55 @@ private fun newCameraPhotoUri(context: Context): Uri {
     val file = File(context.cacheDir, "camera/foto_${System.currentTimeMillis()}.jpg")
     file.parentFile?.mkdirs()
     return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+}
+
+/** Campo de marca: despliega las marcas conocidas (filtradas por lo escrito) y también acepta una nueva. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BrandField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    brands: List<String>,
+    error: String?
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val suggestions = remember(brands, value) { brandSuggestions(brands, value) }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded && suggestions.isNotEmpty(),
+        onExpandedChange = { expanded = it }
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {
+                onValueChange(it)
+                expanded = true
+            },
+            label = { Text("Marca") },
+            placeholder = { Text("Elige o escribe una marca") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded && suggestions.isNotEmpty()) },
+            isError = error != null,
+            supportingText = if (error != null) ({ Text(error) }) else null,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable)
+        )
+        ExposedDropdownMenu(
+            expanded = expanded && suggestions.isNotEmpty(),
+            onDismissRequest = { expanded = false }
+        ) {
+            suggestions.forEach { suggestion ->
+                DropdownMenuItem(
+                    text = { Text(suggestion) },
+                    onClick = {
+                        onValueChange(suggestion)
+                        expanded = false
+                    },
+                    contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding
+                )
+            }
+        }
+    }
 }
