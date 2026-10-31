@@ -7,6 +7,7 @@ import androidx.core.content.edit
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.bodegalider.data.InventoryRepository
+import com.example.bodegalider.data.PgCatalog
 import com.example.bodegalider.data.ProductPhotos
 import com.example.bodegalider.model.CloudPhoto
 import com.example.bodegalider.model.InventoryStats
@@ -14,6 +15,7 @@ import com.example.bodegalider.model.Product
 import com.example.bodegalider.model.TaskItem
 import com.example.bodegalider.model.User
 import com.example.bodegalider.model.UserRole
+import com.example.bodegalider.util.distinctBrands
 import com.example.bodegalider.util.normalizeForSearch
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -139,6 +141,11 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
     val selectedProduct: StateFlow<Product?> = combine(products, _selectedProductId) { list, id ->
         id?.let { selected -> list.find { it.id == selected } }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** Marcas para elegir al registrar o editar: las del catálogo y las que ya se registraron a mano. */
+    val knownBrands: StateFlow<List<String>> = products
+        .map { list -> distinctBrands(PgCatalog.items.map { it.brand } + list.map { it.brand }) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), distinctBrands(PgCatalog.items.map { it.brand }))
 
     val inventoryStats: StateFlow<InventoryStats> = products
         .map { InventoryStats.from(it) }
