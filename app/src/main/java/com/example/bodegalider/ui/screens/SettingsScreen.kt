@@ -55,6 +55,7 @@ fun SettingsScreen(viewModel: InventoryViewModel) {
     val isOnline by viewModel.isOnline.collectAsState()
     val isDarkMode by viewModel.isDarkMode.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
+    val currentStore by viewModel.currentStore.collectAsState()
     var confirmLogout by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val versionName = remember {
@@ -102,13 +103,14 @@ fun SettingsScreen(viewModel: InventoryViewModel) {
                         HorizontalDivider(color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.15f))
                         Spacer(modifier = Modifier.height(4.dp))
                         ListItem(
-                            headlineContent = { Text("Local ${user.storeCode} · ${user.commune}") },
+                            headlineContent = { Text(currentStore ?: "Local ${user.storeCode} · ${user.commune}") },
                             supportingContent = if (user.managedCommunes.isNotEmpty()) {
                                 ({ Text("A cargo de: ${user.managedCommunes.joinToString()}") })
                             } else {
                                 null
                             },
                             leadingContent = { Icon(Icons.Default.Storefront, contentDescription = null) },
+                            trailingContent = { TextButton(onClick = viewModel::changeStore) { Text("Cambiar") } },
                             colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.primaryContainer)
                         )
                         ListItem(
