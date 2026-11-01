@@ -39,7 +39,7 @@ object PdfReportGenerator {
     private val COL_NEEDED = MARGIN + 405f
     private val COL_STATUS = MARGIN + 450f
 
-    fun generatePdf(context: Context, products: List<Product>, storeCode: String, generatedBy: String? = null): File? {
+    fun generatePdf(context: Context, products: List<Product>, storeName: String, generatedBy: String? = null): File? {
         val document = PdfDocument()
         return try {
             val date = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date())
@@ -57,7 +57,7 @@ object PdfReportGenerator {
                 var y: Float
 
                 if (pageNumber == 1) {
-                    drawHeader(canvas, storeCode, date, generatedBy)
+                    drawHeader(canvas, storeName, date, generatedBy)
                     y = HEADER_HEIGHT + 24f
                     drawSummary(canvas, y, stats, products.size)
                     y += 70f
@@ -82,7 +82,8 @@ object PdfReportGenerator {
             val dir = File(context.cacheDir, "reportes").apply { mkdirs() }
             dir.listFiles()?.forEach { it.delete() } // Solo se conserva el último reporte
             val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
-            val file = File(dir, "Reporte_Quiebres_Local_${storeCode}_$stamp.pdf")
+            val fileStore = storeName.normalizeForSearch().replace(Regex("[^a-z0-9]+"), "_").trim('_').ifEmpty { "sala" }
+            val file = File(dir, "Reporte_Quiebres_${fileStore}_$stamp.pdf")
             file.outputStream().use { document.writeTo(it) }
             file
         } catch (e: Exception) {
@@ -93,13 +94,13 @@ object PdfReportGenerator {
         }
     }
 
-    private fun drawHeader(canvas: Canvas, storeCode: String, date: String, generatedBy: String?) {
+    private fun drawHeader(canvas: Canvas, storeName: String, date: String, generatedBy: String?) {
         canvas.drawRect(0f, 0f, PAGE_WIDTH.toFloat(), HEADER_HEIGHT, fill(BRAND_BLUE))
         canvas.drawRect(0f, HEADER_HEIGHT - 5f, PAGE_WIDTH.toFloat(), HEADER_HEIGHT, fill(BRAND_YELLOW))
 
-        canvas.drawText("Reporte de quiebres y reposición", MARGIN, 44f, text(Color.WHITE, 20f, bold = true))
+        canvas.drawText("Reporte de quiebres y stock bajo", MARGIN, 44f, text(Color.WHITE, 20f, bold = true))
         val subtitle = buildString {
-            append("Bodega Líder · Local $storeCode · $date")
+            append("$storeName · $date")
             if (!generatedBy.isNullOrBlank()) append(" · Generado por $generatedBy")
         }
         canvas.drawText(subtitle, MARGIN, 66f, text(Color.argb(220, 255, 255, 255), 10f))

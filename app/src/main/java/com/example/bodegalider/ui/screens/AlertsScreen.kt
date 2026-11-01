@@ -80,9 +80,12 @@ fun AlertsScreen(viewModel: InventoryViewModel) {
     val restockProducts by viewModel.restockProducts.collectAsState()
     val stats by viewModel.inventoryStats.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
+    val currentStore by viewModel.currentStore.collectAsState()
     val workers by viewModel.managedWorkers.collectAsState()
 
-    val storeCode = currentUser?.storeCode ?: "046"
+    val storeName = currentStore ?: "Local ${currentUser?.storeCode ?: "046"}"
+    // El reporte PDF incluye solo lo urgente: productos en quiebre o con stock bajo
+    val reportProducts = restockProducts.filter { it.isQuiebre || it.isLowStock }
     val isSupervisor = currentUser?.isSupervisor == true
     var isGeneratingPdf by remember { mutableStateOf(false) }
     var productToAssign by remember { mutableStateOf<Product?>(null) }
@@ -90,25 +93,25 @@ fun AlertsScreen(viewModel: InventoryViewModel) {
     Column(modifier = Modifier.fillMaxSize()) {
         ScreenHeader(
             title = "Quiebres y reposición",
-            subtitle = if (isSupervisor) "Resumen del sector · ${currentUser?.managedCommunes?.joinToString().orEmpty()}"
-            else "Local $storeCode · productos que requieren atención"
+            subtitle = if (isSupervisor) "$storeName · Sector ${currentUser?.managedCommunes?.joinToString().orEmpty()}"
+            else "$storeName · productos que requieren atención"
         ) {
             FilledTonalButton(
                 onClick = {
                     isGeneratingPdf = true
                     scope.launch {
                         val file = withContext(Dispatchers.IO) {
-                            PdfReportGenerator.generatePdf(context, restockProducts, storeCode, currentUser?.name)
+                            PdfReportGenerator.generatePdf(context, reportProducts, storeName, currentUser?.name)
                         }
                         isGeneratingPdf = false
                         if (file == null) {
                             viewModel.postMessage("No se pudo generar el PDF")
                         } else {
-                            sharePdf(context, file, storeCode, onError = viewModel::postMessage)
+                            sharePdf(context, file, storeName, onError = viewModel::postMessage)
                         }
                     }
                 },
-                enabled = restockProducts.isNotEmpty() && !isGeneratingPdf,
+                enabled = reportProducts.isNotEmpty() && !isGeneratingPdf,
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
             ) {
                 if (isGeneratingPdf) {
@@ -177,13 +180,13 @@ fun AlertsScreen(viewModel: InventoryViewModel) {
     }
 }
 
-private fun sharePdf(context: Context, file: java.io.File, storeCode: String, onError: (String) -> Unit) {
+private fun sharePdf(context: Context, file: java.io.File, storeName: String, onError: (String) -> Unit) {
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
     val intent = Intent(Intent.ACTION_SEND).apply {
         type = "application/pdf"
         putExtra(Intent.EXTRA_STREAM, uri)
-        putExtra(Intent.EXTRA_SUBJECT, "Reporte de quiebres - Local $storeCode")
-        putExtra(Intent.EXTRA_TEXT, "Adjunto el reporte de quiebres y reposición del Local $storeCode.")
+        putExtra(Intent.EXTRA_SUBJECT, "Reporte de quiebres y stock bajo - $storeName")
+        putExtra(Intent.EXTRA_TEXT, "Adjunto el reporte de quiebres y stock bajo de $storeName.")
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     try {

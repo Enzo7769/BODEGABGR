@@ -17,6 +17,7 @@ import com.example.bodegalider.model.User
 import com.example.bodegalider.model.UserRole
 import com.example.bodegalider.util.distinctBrands
 import com.example.bodegalider.util.normalizeForSearch
+import com.example.bodegalider.util.withRecent
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -83,6 +84,16 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
         prefs.getString(KEY_USER_ID, null)?.let { id -> registeredUsers.find { it.id == id } }
     )
     val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
+
+    /** Sala Líder donde se trabaja en esta sesión; se pregunta al ingresar. */
+    private val _currentStore = MutableStateFlow(prefs.getString(KEY_STORE, null))
+    val currentStore: StateFlow<String?> = _currentStore.asStateFlow()
+
+    private val _recentStores = MutableStateFlow(
+        prefs.getString(KEY_RECENT_STORES, null)?.split("\n")?.filter { it.isNotBlank() }.orEmpty()
+    )
+    /** Salas elegidas antes en este equipo, para tocarlas sin escribir. */
+    val recentStores: StateFlow<List<String>> = _recentStores.asStateFlow()
 
     private val teamUsers = MutableStateFlow(registeredUsers.filter { it.role == UserRole.USER })
 
@@ -330,15 +341,37 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
         prefs.edit { putString(KEY_USER_ID, user.id) }
     }
 
+    fun selectStore(store: String) {
+        if (store.isBlank()) return
+        val updated = withRecent(_recentStores.value, store)
+        val selected = updated.first()
+        _currentStore.value = selected
+        _recentStores.value = updated
+        prefs.edit {
+            putString(KEY_STORE, selected)
+            putString(KEY_RECENT_STORES, updated.joinToString("\n"))
+        }
+    }
+
+    /** Vuelve a preguntar en qué Líder se está trabajando. */
+    fun changeStore() {
+        _currentStore.value = null
+        prefs.edit { remove(KEY_STORE) }
+    }
+
     fun logout() {
         _currentUser.value = null
+        _currentStore.value = null
         _searchQuery.value = ""
         _teamSearchQuery.value = ""
         _selectedCommuneFilter.value = ALL_COMMUNES
         _stockFilter.value = StockFilter.ALL
         _selectedProductId.value = null
         closeAddProductDialog()
-        prefs.edit { remove(KEY_USER_ID) }
+        prefs.edit {
+            remove(KEY_USER_ID)
+            remove(KEY_STORE)
+        }
     }
 
     fun setTeamSearchQuery(query: String) {
@@ -455,6 +488,8 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
         const val ALL_COMMUNES = "Todas"
         private const val PREFS_NAME = "bodega_lider_prefs"
         private const val KEY_USER_ID = "current_user_id"
+        private const val KEY_STORE = "current_store"
+        private const val KEY_RECENT_STORES = "recent_stores"
         private const val KEY_DARK_MODE = "dark_mode"
         private const val ALERT_COOLDOWN_MILLIS = 60 * 60 * 1000L
     }

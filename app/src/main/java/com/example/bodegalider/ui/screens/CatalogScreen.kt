@@ -74,7 +74,7 @@ fun CatalogScreen(viewModel: InventoryViewModel) {
     val searchQuery by viewModel.searchQuery.collectAsState()
     val currentSort by viewModel.sortOption.collectAsState()
     val stockFilter by viewModel.stockFilter.collectAsState()
-    val currentUser by viewModel.currentUser.collectAsState()
+    val currentStore by viewModel.currentStore.collectAsState()
     val visibleTasks by viewModel.visibleTasks.collectAsState()
     val stats by viewModel.inventoryStats.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
@@ -85,7 +85,7 @@ fun CatalogScreen(viewModel: InventoryViewModel) {
     Column(modifier = Modifier.fillMaxSize()) {
         ScreenHeader(
             title = "Catálogo de góndola",
-            subtitle = currentUser?.let { "Local ${it.storeCode} · ${it.commune}" }
+            subtitle = currentStore
         ) {
             SortMenu(current = currentSort, onSelect = viewModel::setSortOption)
         }

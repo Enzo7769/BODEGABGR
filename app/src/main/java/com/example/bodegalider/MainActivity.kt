@@ -15,6 +15,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import com.example.bodegalider.ui.screens.LoginScreen
+import com.example.bodegalider.ui.screens.StoreSelectionScreen
 import com.example.bodegalider.ui.screens.MainScreen
 import com.example.bodegalider.ui.theme.BodegaLiderTheme
 import com.example.bodegalider.ui.viewmodel.InventoryViewModel
@@ -28,6 +29,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val isDarkMode by viewModel.isDarkMode.collectAsState()
             val currentUser by viewModel.currentUser.collectAsState()
+            val currentStore by viewModel.currentStore.collectAsState()
 
             // Íconos de la barra de estado acordes al tema elegido en la app (no al del sistema)
             DisposableEffect(isDarkMode) {
@@ -43,10 +45,10 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    if (currentUser == null) {
-                        LoginScreen(viewModel = viewModel)
-                    } else {
-                        MainScreen(viewModel = viewModel)
+                    when {
+                        currentUser == null -> LoginScreen(viewModel = viewModel)
+                        currentStore == null -> StoreSelectionScreen(viewModel = viewModel)
+                        else -> MainScreen(viewModel = viewModel)
                     }
                 }
             }

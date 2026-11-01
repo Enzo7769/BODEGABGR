@@ -11,4 +11,12 @@ class TextUtilsTest {
         assertEquals("atun en aceite", "Atún en Aceite".normalizeForSearch())
         assertEquals("sofia", "SOFÍA".normalizeForSearch())
     }
+
+    @Test
+    fun recientesSinRepetirYConLimite() {
+        val recent = listOf("Líder Maipú", "Líder Pudahuel")
+        assertEquals(listOf("Líder Pudahuel", "Líder Maipú"), withRecent(recent, "  lider   pudahuel "))
+        assertEquals(listOf("Líder Cerrillos", "Líder Maipú"), withRecent(recent, "Líder Cerrillos", max = 2))
+        assertEquals(recent, withRecent(recent, "   "))
+    }
 }
