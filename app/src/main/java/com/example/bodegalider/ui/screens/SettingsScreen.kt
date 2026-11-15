@@ -10,12 +10,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Storefront
@@ -27,10 +30,12 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,10 +44,13 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import com.example.bodegalider.ui.components.Pill
 import com.example.bodegalider.ui.components.ScreenHeader
@@ -56,6 +64,7 @@ fun SettingsScreen(viewModel: InventoryViewModel) {
     val isDarkMode by viewModel.isDarkMode.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
     val currentStore by viewModel.currentStore.collectAsState()
+    var showNameDialog by rememberSaveable { mutableStateOf(false) }
     var confirmLogout by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val versionName = remember {
@@ -77,6 +86,16 @@ fun SettingsScreen(viewModel: InventoryViewModel) {
         ) {
             // Perfil
             currentUser?.let { user ->
+                if (showNameDialog) {
+                    EditNameDialog(
+                        currentName = user.name,
+                        onSave = {
+                            viewModel.updateDisplayName(it)
+                            showNameDialog = false
+                        },
+                        onDismiss = { showNameDialog = false }
+                    )
+                }
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = MaterialTheme.shapes.large,
@@ -96,6 +115,13 @@ fun SettingsScreen(viewModel: InventoryViewModel) {
                                     text = user.role.label,
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                            IconButton(onClick = { showNameDialog = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = "Editar nombre",
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                             }
                         }
@@ -221,4 +247,32 @@ fun SettingsScreen(viewModel: InventoryViewModel) {
             }
         )
     }
+}
+
+/** Diálogo para cambiar el nombre con el que el usuario aparece en la app y en el reporte PDF. */
+@Composable
+private fun EditNameDialog(currentName: String, onSave: (String) -> Unit, onDismiss: () -> Unit) {
+    var name by rememberSaveable { mutableStateOf(currentName) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Tu nombre") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it.take(InventoryViewModel.MAX_NAME_LENGTH) },
+                label = { Text("Nombre y apellido") },
+                supportingText = { Text("Aparece en la app y en el reporte PDF") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { if (name.isNotBlank()) onSave(name) }),
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(name) }, enabled = name.isNotBlank()) { Text("Guardar") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancelar") }
+        }
+    )
 }
