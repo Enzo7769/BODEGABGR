@@ -98,12 +98,11 @@ object PdfReportGenerator {
         canvas.drawRect(0f, 0f, PAGE_WIDTH.toFloat(), HEADER_HEIGHT, fill(BRAND_BLUE))
         canvas.drawRect(0f, HEADER_HEIGHT - 5f, PAGE_WIDTH.toFloat(), HEADER_HEIGHT, fill(BRAND_YELLOW))
 
-        canvas.drawText("Reporte de quiebres y stock bajo", MARGIN, 44f, text(Color.WHITE, 20f, bold = true))
-        val subtitle = buildString {
-            append("$storeName · $date")
-            if (!generatedBy.isNullOrBlank()) append(" · Generado por $generatedBy")
+        canvas.drawText("Reporte de quiebres y stock bajo", MARGIN, 40f, text(Color.WHITE, 20f, bold = true))
+        canvas.drawText("$storeName · $date", MARGIN, 60f, text(Color.argb(220, 255, 255, 255), 10f))
+        if (!generatedBy.isNullOrBlank()) {
+            canvas.drawText("Generado por $generatedBy", MARGIN, 76f, text(Color.WHITE, 10f, bold = true))
         }
-        canvas.drawText(subtitle, MARGIN, 66f, text(Color.argb(220, 255, 255, 255), 10f))
     }
 
     private fun drawSummary(canvas: Canvas, top: Float, stats: InventoryStats, listed: Int) {

@@ -81,7 +81,7 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
     val demoUsers: List<User> = registeredUsers
 
     private val _currentUser = MutableStateFlow(
-        prefs.getString(KEY_USER_ID, null)?.let { id -> registeredUsers.find { it.id == id } }
+        prefs.getString(KEY_USER_ID, null)?.let { id -> registeredUsers.find { it.id == id } }?.let(::withSavedName)
     )
     val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
 
@@ -95,7 +95,7 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
     /** Salas elegidas antes en este equipo, para tocarlas sin escribir. */
     val recentStores: StateFlow<List<String>> = _recentStores.asStateFlow()
 
-    private val teamUsers = MutableStateFlow(registeredUsers.filter { it.role == UserRole.USER })
+    private val teamUsers = MutableStateFlow(registeredUsers.filter { it.role == UserRole.USER }.map(::withSavedName))
 
     private val _tasks = MutableStateFlow(
         listOf(
@@ -336,10 +336,24 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun loginAs(user: User) {
-        _currentUser.value = user
+        _currentUser.value = withSavedName(user)
         _currentTab.value = defaultTabFor(user)
         prefs.edit { putString(KEY_USER_ID, user.id) }
     }
+
+    /** Nombre con el que el usuario aparece en la app y en el reporte PDF (los usuarios de prueba traen uno genérico). */
+    fun updateDisplayName(name: String) {
+        val user = _currentUser.value ?: return
+        val clean = name.trim().replace(Regex("\\s+"), " ").take(MAX_NAME_LENGTH)
+        if (clean.isEmpty()) return
+        prefs.edit { putString(KEY_NAME_PREFIX + user.id, clean) }
+        _currentUser.value = user.copy(name = clean)
+        teamUsers.update { list -> list.map { if (it.id == user.id) it.copy(name = clean) else it } }
+        postMessage("Nombre actualizado")
+    }
+
+    private fun withSavedName(user: User): User =
+        prefs.getString(KEY_NAME_PREFIX + user.id, null)?.let { user.copy(name = it) } ?: user
 
     fun selectStore(store: String) {
         if (store.isBlank()) return
@@ -489,6 +503,8 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
         private const val PREFS_NAME = "bodega_lider_prefs"
         private const val KEY_USER_ID = "current_user_id"
         private const val KEY_STORE = "current_store"
+        private const val KEY_NAME_PREFIX = "display_name_"
+        const val MAX_NAME_LENGTH = 40
         private const val KEY_RECENT_STORES = "recent_stores"
         private const val KEY_DARK_MODE = "dark_mode"
         private const val ALERT_COOLDOWN_MILLIS = 60 * 60 * 1000L
