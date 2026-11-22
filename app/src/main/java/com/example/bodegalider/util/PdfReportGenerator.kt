@@ -11,7 +11,10 @@ import android.util.Log
 import com.example.bodegalider.model.InventoryStats
 import com.example.bodegalider.model.Product
 import com.example.bodegalider.model.StockStatus
+import com.example.bodegalider.model.formatDate
+import com.example.bodegalider.model.formatTime
 import java.io.File
+import java.time.ZoneId
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -32,6 +35,8 @@ object PdfReportGenerator {
     private val DIVIDER = Color.rgb(222, 226, 232)
     private val ZEBRA = Color.rgb(246, 248, 252)
 
+    private val zone: ZoneId get() = ZoneId.systemDefault()
+
     // Columnas: producto | ubicación | góndola | reponer | estado
     private val COL_PRODUCT = MARGIN + 8f
     private val COL_LOCATION = MARGIN + 220f
@@ -39,7 +44,13 @@ object PdfReportGenerator {
     private val COL_NEEDED = MARGIN + 405f
     private val COL_STATUS = MARGIN + 450f
 
-    fun generatePdf(context: Context, products: List<Product>, storeName: String, generatedBy: String? = null): File? {
+    fun generatePdf(
+        context: Context,
+        products: List<Product>,
+        storeName: String,
+        generatedBy: String? = null,
+        scanFilter: String? = null
+    ): File? {
         val document = PdfDocument()
         return try {
             val date = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date())
@@ -57,7 +68,7 @@ object PdfReportGenerator {
                 var y: Float
 
                 if (pageNumber == 1) {
-                    drawHeader(canvas, storeName, date, generatedBy)
+                    drawHeader(canvas, storeName, date, generatedBy, scanFilter)
                     y = HEADER_HEIGHT + 24f
                     drawSummary(canvas, y, stats, products.size)
                     y += 70f
@@ -94,12 +105,16 @@ object PdfReportGenerator {
         }
     }
 
-    private fun drawHeader(canvas: Canvas, storeName: String, date: String, generatedBy: String?) {
+    private fun drawHeader(canvas: Canvas, storeName: String, date: String, generatedBy: String?, scanFilter: String?) {
         canvas.drawRect(0f, 0f, PAGE_WIDTH.toFloat(), HEADER_HEIGHT, fill(BRAND_BLUE))
         canvas.drawRect(0f, HEADER_HEIGHT - 5f, PAGE_WIDTH.toFloat(), HEADER_HEIGHT, fill(BRAND_YELLOW))
 
         canvas.drawText("Reporte de quiebres y stock bajo", MARGIN, 40f, text(Color.WHITE, 20f, bold = true))
-        canvas.drawText("$storeName · $date", MARGIN, 60f, text(Color.argb(220, 255, 255, 255), 10f))
+        val subtitle = buildString {
+            append("$storeName · $date")
+            if (!scanFilter.isNullOrBlank()) append(" · Escaneados: $scanFilter")
+        }
+        canvas.drawText(subtitle, MARGIN, 60f, text(Color.argb(220, 255, 255, 255), 10f))
         if (!generatedBy.isNullOrBlank()) {
             canvas.drawText("Generado por $generatedBy", MARGIN, 76f, text(Color.WHITE, 10f, bold = true))
         }
@@ -154,6 +169,8 @@ object PdfReportGenerator {
         canvas.drawText(ellipsize("Cód. ${product.barcode}", mutedPaint, COL_LOCATION - COL_PRODUCT - 10f), COL_PRODUCT, top + 39f, mutedPaint)
 
         canvas.drawText(ellipsize(product.locationText, bodyPaint, COL_STOCK - COL_LOCATION - 8f), COL_LOCATION, top + 27f, bodyPaint)
+        val scanText = product.lastScannedAt?.let { "Esc. ${formatDate(it, zone)} ${formatTime(it, zone)}" } ?: "Sin escanear"
+        canvas.drawText(ellipsize(scanText, mutedPaint, COL_STOCK - COL_LOCATION - 8f), COL_LOCATION, top + 39f, mutedPaint)
         canvas.drawText("${product.stockOnShelf}", COL_STOCK + 10f, top + 27f, bodyPaint)
         canvas.drawText("${product.quantityNeeded}", COL_NEEDED + 10f, top + 27f, text(TEXT_DARK, 10f, bold = true))
 
