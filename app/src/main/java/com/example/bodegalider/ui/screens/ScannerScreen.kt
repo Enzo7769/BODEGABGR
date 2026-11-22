@@ -114,6 +114,12 @@ fun ScannerScreen(viewModel: InventoryViewModel) {
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         scannedCode = code.trim()
     }
+    // Cada lectura queda registrada con fecha y hora (una vez por lectura, aunque cambie el stock en pantalla)
+    val scannedProductId = scannedProduct?.id
+    LaunchedEffect(scannedCode, scannedProductId) {
+        if (scannedProductId != null) viewModel.recordScan(scannedProductId)
+    }
+
     val resumeScanning = {
         scannedCode = null
         scanPaused.set(false)

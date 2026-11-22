@@ -433,6 +433,11 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
         repository.adjustStock(productId, delta)
     }
 
+    /** Registra la fecha y hora del escaneo (cámara o código escrito en el escáner). */
+    fun recordScan(productId: String) {
+        repository.recordScan(productId, System.currentTimeMillis())
+    }
+
     fun updateProduct(product: Product) {
         val previousUri = products.value.find { it.id == product.id }?.imageUri.orEmpty()
         if (product.imageUri.isBlank() && CloudPhoto.parse(previousUri) != null) photos.delete(product.id)
@@ -475,7 +480,9 @@ class InventoryViewModel(application: Application) : AndroidViewModel(applicatio
             brand = product.brand.trim(),
             isOutOfStock = product.isOutOfStock || product.stockOnShelf <= 0,
             aisle = product.aisle.trim(),
-            locationDetail = product.locationDetail.trim()
+            locationDetail = product.locationDetail.trim(),
+            // Si se registra desde el escáner, ese momento cuenta como su primer escaneo
+            lastScannedAt = if (_scannedBarcodeForNew.value.isNotBlank()) System.currentTimeMillis() else null
         )
         withUploadedPhoto(newProduct) { repository.addProduct(it) }
         closeAddProductDialog()

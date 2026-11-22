@@ -87,11 +87,12 @@ class InventoryRepository(context: Context) {
             // "outOfStock" es la clave que generaba la serialización automática en versiones anteriores
             isOutOfStock = (data["isOutOfStock"] ?: data["outOfStock"]) as? Boolean ?: false,
             aisle = data["aisle"] as? String ?: "",
-            locationDetail = data["locationDetail"] as? String ?: ""
+            locationDetail = data["locationDetail"] as? String ?: "",
+            lastScannedAt = (data["lastScannedAt"] as? Number)?.toLong()
         )
     }
 
-    private fun Product.toFirestoreMap(): Map<String, Any> = mapOf(
+    private fun Product.toFirestoreMap(): Map<String, Any?> = mapOf(
         "barcode" to barcode,
         "name" to name,
         "brand" to brand,
@@ -100,7 +101,8 @@ class InventoryRepository(context: Context) {
         "quantityNeeded" to quantityNeeded,
         "isOutOfStock" to isOutOfStock,
         "aisle" to aisle,
-        "locationDetail" to locationDetail
+        "locationDetail" to locationDetail,
+        "lastScannedAt" to lastScannedAt
     )
 
     /**
@@ -179,6 +181,12 @@ class InventoryRepository(context: Context) {
                 "isOutOfStock" to updated.isOutOfStock
             )
         )
+    }
+
+    /** Guarda la fecha y hora en que se escaneó el producto. */
+    fun recordScan(productId: String, scannedAt: Long) {
+        _products.value = _products.value.map { if (it.id == productId) it.copy(lastScannedAt = scannedAt) else it }
+        productsCollection.document(productId).update("lastScannedAt", scannedAt)
     }
 
     fun updateImageUri(productId: String, imageUri: String) {

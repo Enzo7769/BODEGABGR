@@ -16,7 +16,8 @@ data class Product(
     val quantityNeeded: Int = 0, // Cantidad faltante por rellenar
     val isOutOfStock: Boolean = false, // Quiebre confirmado (no hay en bodega ni viene en camino)
     val aisle: String = "", // Número o nombre de pasillo (ej: "Pasillo 4")
-    val locationDetail: String = "" // Detalle (ej: "Cartel 12", "Cabecera", "Isla")
+    val locationDetail: String = "", // Detalle (ej: "Cartel 12", "Cabecera", "Isla")
+    val lastScannedAt: Long? = null // Fecha y hora del último escaneo (milisegundos), null si nunca se escaneó
 ) {
     val isQuiebre: Boolean
         get() = isOutOfStock || stockOnShelf <= 0

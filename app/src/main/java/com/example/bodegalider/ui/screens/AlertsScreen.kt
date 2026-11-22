@@ -72,6 +72,18 @@ import com.example.bodegalider.util.PdfReportGenerator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material3.FilterChip
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.example.bodegalider.model.ScanPeriod
+import com.example.bodegalider.model.ScanRange
+import com.example.bodegalider.model.formatScanTime
+import com.example.bodegalider.model.range
+import com.example.bodegalider.model.scannedWithin
+import com.example.bodegalider.ui.components.ScanRangeDialog
+import java.time.ZoneId
 
 @Composable
 fun AlertsScreen(viewModel: InventoryViewModel) {
@@ -84,8 +96,25 @@ fun AlertsScreen(viewModel: InventoryViewModel) {
     val workers by viewModel.managedWorkers.collectAsState()
 
     val storeName = currentStore ?: "Local ${currentUser?.storeCode ?: "046"}"
-    // El reporte PDF incluye solo lo urgente: productos en quiebre o con stock bajo
-    val reportProducts = restockProducts.filter { it.isQuiebre || it.isLowStock }
+
+    // Filtro por fecha y hora del último escaneo
+    val zone = remember { ZoneId.systemDefault() }
+    var scanPeriod by rememberSaveable { mutableStateOf(ScanPeriod.ALL) }
+    var customFrom by rememberSaveable { mutableStateOf<Long?>(null) }
+    var customTo by rememberSaveable { mutableStateOf<Long?>(null) }
+    var showRangeDialog by rememberSaveable { mutableStateOf(false) }
+    val customRange = if (customFrom != null && customTo != null) ScanRange(customFrom!!, customTo!!) else null
+    val now = System.currentTimeMillis()
+    val scanRange = scanPeriod.range(now, zone, customRange)
+    val scanFilterLabel = when {
+        scanRange == null -> null
+        scanPeriod == ScanPeriod.CUSTOM -> "${formatScanTime(scanRange.fromMillis, now, zone)} – ${formatScanTime(scanRange.toMillis, now, zone)}"
+        else -> scanPeriod.label
+    }
+    val visibleProducts = restockProducts.scannedWithin(scanRange)
+
+    // El reporte PDF incluye solo lo urgente (quiebre o stock bajo) dentro del filtro de escaneo elegido
+    val reportProducts = visibleProducts.filter { it.isQuiebre || it.isLowStock }
     val isSupervisor = currentUser?.isSupervisor == true
     var isGeneratingPdf by remember { mutableStateOf(false) }
     var productToAssign by remember { mutableStateOf<Product?>(null) }
@@ -101,7 +130,7 @@ fun AlertsScreen(viewModel: InventoryViewModel) {
                     isGeneratingPdf = true
                     scope.launch {
                         val file = withContext(Dispatchers.IO) {
-                            PdfReportGenerator.generatePdf(context, reportProducts, storeName, currentUser?.name)
+                            PdfReportGenerator.generatePdf(context, reportProducts, storeName, currentUser?.name, scanFilterLabel)
                         }
                         isGeneratingPdf = false
                         if (file == null) {
@@ -131,6 +160,18 @@ fun AlertsScreen(viewModel: InventoryViewModel) {
         ) {
             item(key = "summary") { SummaryCard(stats) }
 
+            if (restockProducts.isNotEmpty()) {
+                item(key = "scan_filter") {
+                    ScanFilterRow(
+                        selected = scanPeriod,
+                        customLabel = if (scanPeriod == ScanPeriod.CUSTOM) scanFilterLabel else null,
+                        onSelect = { period ->
+                            if (period == ScanPeriod.CUSTOM) showRangeDialog = true else scanPeriod = period
+                        }
+                    )
+                }
+            }
+
             if (restockProducts.isEmpty()) {
                 item(key = "empty") {
                     EmptyState(
@@ -140,16 +181,25 @@ fun AlertsScreen(viewModel: InventoryViewModel) {
                         message = "No hay productos sin stock ni pendientes de reposición."
                     )
                 }
+            } else if (visibleProducts.isEmpty()) {
+                item(key = "empty_filter") {
+                    EmptyState(
+                        icon = Icons.Default.QrCodeScanner,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        title = "Sin escaneos en este periodo",
+                        message = "Ningún producto por atender se escaneó en ${scanFilterLabel ?: "el periodo elegido"}."
+                    )
+                }
             } else {
                 item(key = "title") {
                     Text(
-                        text = "${restockProducts.size} productos por atender",
+                        text = "${visibleProducts.size} productos por atender",
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 6.dp)
                     )
                 }
-                items(restockProducts, key = { it.id }) { product ->
+                items(visibleProducts, key = { it.id }) { product ->
                     RestockProductCard(
                         product = product,
                         showAssign = isSupervisor,
@@ -159,6 +209,22 @@ fun AlertsScreen(viewModel: InventoryViewModel) {
                 }
             }
         }
+    }
+
+    if (showRangeDialog) {
+        ScanRangeDialog(
+            initial = customRange ?: ScanRange(
+                ScanPeriod.TODAY.range(now, zone)!!.fromMillis,
+                now
+            ),
+            onApply = { range ->
+                customFrom = range.fromMillis
+                customTo = range.toMillis
+                scanPeriod = ScanPeriod.CUSTOM
+                showRangeDialog = false
+            },
+            onDismiss = { showRangeDialog = false }
+        )
     }
 
     productToAssign?.let { product ->
@@ -193,6 +259,32 @@ private fun sharePdf(context: Context, file: java.io.File, storeName: String, on
         context.startActivity(Intent.createChooser(intent, "Compartir reporte"))
     } catch (_: ActivityNotFoundException) {
         onError("No hay aplicaciones para compartir el PDF")
+    }
+}
+
+/** Chips para filtrar los productos por la fecha y hora de su último escaneo. */
+@Composable
+private fun ScanFilterRow(selected: ScanPeriod, customLabel: String?, onSelect: (ScanPeriod) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = "Escaneados",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(ScanPeriod.entries.toList()) { period ->
+                FilterChip(
+                    selected = period == selected,
+                    onClick = { onSelect(period) },
+                    label = { Text(if (period == ScanPeriod.CUSTOM && customLabel != null) customLabel else period.label) },
+                    leadingIcon = if (period == ScanPeriod.CUSTOM) {
+                        { Icon(Icons.Default.DateRange, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    } else {
+                        null
+                    }
+                )
+            }
+        }
     }
 }
 
@@ -329,6 +421,26 @@ private fun RestockProductCard(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.QrCodeScanner,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            val scannedAt = product.lastScannedAt
+                            Text(
+                                text = if (scannedAt != null) {
+                                    "Escaneado: ${formatScanTime(scannedAt, System.currentTimeMillis(), ZoneId.systemDefault())}"
+                                } else {
+                                    "Sin escanear"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
                             )
                         }
                     }
